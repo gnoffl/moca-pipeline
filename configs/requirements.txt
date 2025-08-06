@@ -1,0 +1,19 @@
+# MOCA Pipeline Dependencies
+
+# Core libraries
+pandas
+numpy
+h5py
+PyYAML
+tqdm
+
+# Plotting & Visualization
+matplotlib
+logomaker
+weblogo
+seaborn  
+
+# Scientific & Bioinformatics
+scipy
+biopython
+requests

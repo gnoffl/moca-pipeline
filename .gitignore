@@ -1,0 +1,12 @@
+# Ignore the results directory
+results/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore local installation artifacts
+*.egg-info/
+
+# Ignore system-specific files
+.DS_Store

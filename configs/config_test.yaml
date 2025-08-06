@@ -1,0 +1,72 @@
+# --- General Settings ---
+run_name: "arabis_nem_helixer_local_db_run"
+input_hdf5: "data/results/modisco/Anem-DWh-0X0.8_deepcre_motifs_250127_125406.hdf5"
+species_tag: "Anem"
+model_tag: "DW"
+
+# This global setting tells all downstream steps to use the trimmed motif file.
+use_trimmed_motifs: true
+
+# --- Pipeline Steps ---
+# Set 'run: true' to execute a step, 'run: false' to skip it.
+
+nomenclature:
+  run: true
+  matrix_type: "CWM"
+  trim_motifs: true
+  trim_threshold: 0.25
+
+visualization:
+  run: false
+
+comparison:
+  run: false
+  min_overlap: 5
+  top_n_plots: 3
+  
+  # --- Local Database Configuration ---
+  # Path to the main directory where you unzipped the motif databases
+  local_db_path: "data/meme_db/motif_databases.12.27/motif_databases"
+  
+  # List of the specific database subdirectories to compare against.
+  # The script will create separate results for each of these.
+  databases_to_compare:
+    - 'JASPAR'
+    - 'ARABD'
+    - 'RNA'
+    - 'MIRBASE'
+      
+importance:
+  run: true
+
+saliency:
+  run: false 
+  # saliency_scores_h5: "path/to/scores.h5"
+  # metadata_csv: "path/to/meta_info.csv"
+  # target_gene_id: "GENE_ID_TO_PLOT"
+
+clustering:
+  run: false
+  dendrogram_filter: "F_"   # Optional: only show forward motifs on the dendrogram
+
+ranging:
+  run: true
+
+projection:
+  run: true
+  blamm_executable: "/home/ibg-4/Desktop/blamm/blamm/build/blamm"
+  reference_genome_fasta: "/home/ibg-4/Desktop/Rhome/moca/data/reference/arabis_nemorensis/arabis_nem.hic.p_ctg_8Chr_RagTag_Mod_chr_changed.fasta"
+  reference_gff: "/home/ibg-4/Desktop/Rhome/moca/data/reference/arabis_nemorensis/arabis_nem_helixer.v.0.gtf"
+  flank_size: 1000
+
+annotation:
+  run: true
+  reference_gff: "/home/ibg-4/Desktop/Rhome/moca/data/reference/arabis_nemorensis/arabis_nem_helixer.v.0.gtf"
+
+browser_viz:
+  run: true
+  target_gene_list: "configs/arabis_test_genes.txt"
+
+  #prediction_probabilities_csv: "path/to/your/predictions.csv"
+  #true_expression_classes_csv: "path/to/your/expression_data.csv"
+  #functional_annotation_txt: "path/to/your/functional_annotation.txt"

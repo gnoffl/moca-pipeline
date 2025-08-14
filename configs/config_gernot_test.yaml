@@ -1,5 +1,5 @@
 # --- General Settings ---
-run_name: "Athaliana_dCRE_S0"
+run_name: "Athal_pareto_front"
 input_hdf5: "data/results/modisco/arabidopsis_modisco_pelekeetal2024.hdf5"
 species_tag: "Atha"
 model_tag: "S0"
@@ -54,17 +54,17 @@ ranging:
 projection:
   run: true
   blamm_executable: "/home/ibg-4/Desktop/blamm/blamm/build/blamm"
-  reference_genome_fasta: "/home/ibg-4/Desktop/Rhome/moca/data/reference/arabidopsis_thaliana/Arabidopsis_thaliana.TAIR10.dna.toplevel.fa"
-  reference_gff: "/home/ibg-4/Desktop/Rhome/moca/data/reference/arabidopsis_thaliana/Arabidopsis_thaliana.TAIR10.55.gff3"
+  reference_genome_fasta: "/home/ibg-4/Desktop/Rhome/moca/data/reference/gernot_artificials/arabidopsis_toolkit_msr_max_250806_153949_522568_pareto_fronts_deduplicated.fa"
+  reference_gff: "/home/ibg-4/Desktop/Rhome/moca/data/reference/gernot_artificials/arabidopsis_toolkit_msr_max_250806_153949_522568_pareto_fronts_deduplicated.gff3"
   flank_size: 1000
 
 annotation:
   run: true
-  reference_gff: "/home/ibg-4/Desktop/Rhome/moca/data/reference/arabidopsis_thaliana/Arabidopsis_thaliana.TAIR10.55.gff3"
+  reference_gff: "/home/ibg-4/Desktop/Rhome/moca/data/reference/gernot_artificials/arabidopsis_toolkit_msr_max_250806_153949_522568_pareto_fronts_deduplicated.gff3"
 
 browser_viz:
   run: true
-  target_gene_list: "configs/gernot_genes.txt"
+  target_gene_list: "/configs/gernot_example_genes.txt"
 
   #prediction_probabilities_csv: "path/to/your/predictions.csv"
   #true_expression_classes_csv: "path/to/your/expression_data.csv"

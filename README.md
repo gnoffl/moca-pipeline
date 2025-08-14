@@ -71,7 +71,9 @@ MOCAP uses convenient publicly available input data in addition to the modisco f
 *reference* this directory shall contain species specific genome (.fa, .fas) and annotation files (.gff, .gff3, .gtf)
 *deepCRE_results* this directory shall contain the results of https://github.com/NAMlab/deepCRE_reimplemented, modisco results 
 
+`cd data`
 `mkdir motif_database reference deepCRE_results`
+`cd ..`
 
 ## Workflow
 Running the pipeline is a simple, two-step process: configure and execute.

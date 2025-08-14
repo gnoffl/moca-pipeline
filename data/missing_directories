@@ -1,0 +1,6 @@
+Place here:
+"motif_database" from https://meme-suite.org/meme/doc/download.html
+
+"reference" this directory shall contain species specific genome (.fa, .fas) and annotation files (.gff, .gff3, .gtf)
+
+"deepCRE_results" this directory shall contain the results of https://github.com/NAMlab/deepCRE_reimplemented, modisco results

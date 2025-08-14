@@ -6,17 +6,26 @@ import numpy as np
 import base64
 from pathlib import Path
 
+def _normalize_gene_id(series):
+    """
+    Removes common prefixes and transcript versions from gene IDs for consistent matching.
+    e.g., 'gene:AT1G01010.1' becomes 'AT1G01010'.
+    """
+    if series is None:
+        return None
+    return series.str.replace('^gene:', '', regex=True).str.replace(r'\.\d+$', '', regex=True)
+
 def _load_gff(filepath):
     """Loads a GFF/GTF file, parsing it into a pandas DataFrame."""
     try:
         col_names = ['seqid', 'source', 'type', 'start', 'end', 'score', 'strand', 'phase', 'attributes']
         df = pd.read_csv(filepath, sep='\t', comment='#', header=None, names=col_names, low_memory=False)
         
-        df['gene_id'] = df['attributes'].str.extract(r'gene_id[= ]"([^"]+)"', expand=False)
-        if df['gene_id'].isnull().all():
-            df['gene_id'] = df['attributes'].str.extract(r'ID=([^;]+)', expand=False)
-        
-        df.dropna(subset=['gene_id'], inplace=True)
+        # Extract ID, Parent, and a potential gene_id from the attributes for linking
+        df['id'] = df['attributes'].str.extract(r'ID=([^;]+)', expand=False)
+        df['parent_id'] = df['attributes'].str.extract(r'Parent=([^;]+)', expand=False)
+        df['gene_id_attr'] = df['attributes'].str.extract(r'gene_id=([^;]+)', expand=False)
+
         return df
     except Exception as e:
         print(f"Error loading or parsing GFF/GTF file {filepath}: {e}")
@@ -31,6 +40,7 @@ def image_to_base64(path):
             encoded_string = base64.b64encode(image_file.read()).decode()
         return f"data:image/png;base64,{encoded_string}"
     except Exception as e:
+        print(f"Warning: Could not encode image {path} to base64. {e}")
         return "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
 
 def get_top_match(motif_id, comparison_dir, db_name):
@@ -51,7 +61,6 @@ def generate_html_report(data, output_path):
     
     json_data = json.dumps(data, indent=4)
     
-    # Dynamically create table headers from the discovered databases
     db_headers = ""
     for db_name in data['db_names']:
         db_headers += f"<th>Top {db_name} Match</th>\n"
@@ -63,17 +72,17 @@ def generate_html_report(data, output_path):
             db_matches_html += f"<td>{motif['matches'].get(db_name, 'N/A')}</td>\n"
             
         table_rows_html += f"""
-            <tr>
-                <td>{motif['id']}</td>
-                <td class="logo-cell"><img src="{motif['logo_fwd']}" alt="Fwd Logo"></td>
-                <td class="logo-cell"><img src="{motif['logo_rev']}" alt="Rev Logo"></td>
-                <td class="plot-cell"><img src="{motif['range_plot']}" alt="Range Plot"></td>
-                <td>{motif['importance']:.4f}</td>
-                <td>{motif['position']}</td>
-                <td>{motif['distance']}</td>
-                <td>{motif['strand']}</td>
-                {db_matches_html}
-            </tr>
+                <tr>
+                    <td>{motif['id']}</td>
+                    <td class="logo-cell"><img src="{motif['logo_fwd']}" alt="Fwd Logo"></td>
+                    <td class="logo-cell"><img src="{motif['logo_rev']}" alt="Rev Logo"></td>
+                    <td class="plot-cell"><img src="{motif['range_plot']}" alt="Range Plot"></td>
+                    <td>{motif['importance']:.4f}</td>
+                    <td>{motif['position']}</td>
+                    <td>{motif['distance']}</td>
+                    <td>{motif['strand']}</td>
+                    {db_matches_html}
+                </tr>
 """
 
     html_template = f"""
@@ -88,7 +97,10 @@ def generate_html_report(data, output_path):
         #chart-container {{ width: 100%; overflow-x: auto; border: 1px solid #ccc; background-color: #f9f9f9; margin-bottom: 2em;}}
         svg {{ min-width: 100%; }}
         .gene-backbone {{ stroke: #555; stroke-width: 2; }}
-        .exon {{ fill: #3498db; stroke: #2980b9; cursor: pointer; }}
+        .feature {{ cursor: pointer; }}
+        .exon {{ fill: #B0B0B0; stroke: #888888; }} /* Light Grey for Exons */
+        .CDS {{ fill: #666666; stroke: #444444; }} /* Dark Grey for CDS */
+        .five_prime_UTR, .three_prime_UTR {{ fill: #E0E0E0; stroke: #C0C0C0; }} /* Very Light Grey for UTRs */
         .motif {{ cursor: pointer; }}
         .axis-line {{ stroke: #aaa; stroke-width: 1; }}
         .axis-tick {{ stroke: #aaa; stroke-width: 1; }}
@@ -184,7 +196,7 @@ def generate_html_report(data, output_path):
                 label.setAttribute("y", axisY + 20);
                 label.setAttribute("text-anchor", "middle");
                 label.classList.add("axis-label");
-                label.textContent = Math.round(pos / 1000) + 'kb';
+                label.textContent = Math.round(pos); // Changed label to show bp instead of kb
                 g.appendChild(label);
             }}
 
@@ -212,24 +224,33 @@ def generate_html_report(data, output_path):
                 g.appendChild(arrow);
             }}
 
-            data.exons.forEach(exon => {{
-                const exonRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-                exonRect.setAttribute("x", scale(exon.start));
-                exonRect.setAttribute("y", geneY - 7.5);
-                exonRect.setAttribute("width", scale(exon.end) - scale(exon.start));
-                exonRect.setAttribute("height", 15);
-                exonRect.classList.add("exon");
-                g.appendChild(exonRect);
+            data.features.forEach(feature => {{
+                const featureRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                featureRect.setAttribute("x", scale(feature.start));
+                const featureWidth = scale(feature.end) - scale(feature.start);
+                featureRect.setAttribute("width", Math.max(1, featureWidth));
+                featureRect.classList.add("feature");
+                featureRect.classList.add(feature.type);
 
-                exonRect.addEventListener('mouseover', (event) => {{
+                // Adjust height and Y position based on feature type
+                if (feature.type === 'CDS') {{
+                    featureRect.setAttribute("y", geneY - 7.5);
+                    featureRect.setAttribute("height", 15);
+                }} else {{ // UTRs and Exons
+                    featureRect.setAttribute("y", geneY - 5);
+                    featureRect.setAttribute("height", 10);
+                }}
+                g.appendChild(featureRect);
+
+                featureRect.addEventListener('mouseover', (event) => {{
                     tooltip.style.visibility = 'visible';
-                    tooltip.innerHTML = `<b>Exon</b>\\n<b>Position:</b> ${{exon.start}} - ${{exon.end}}`;
+                    tooltip.innerHTML = `<b>${{feature.type.replace('_', ' ')}}</b>\\n<b>Position:</b> ${{feature.start}} - ${{feature.end}}`;
                 }});
-                exonRect.addEventListener('mousemove', (event) => {{
+                featureRect.addEventListener('mousemove', (event) => {{
                     tooltip.style.top = (event.pageY - 10) + 'px';
                     tooltip.style.left = (event.pageX + 10) + 'px';
                 }});
-                exonRect.addEventListener('mouseout', () => {{
+                featureRect.addEventListener('mouseout', () => {{
                     tooltip.style.visibility = 'hidden';
                 }});
             }});
@@ -240,17 +261,12 @@ def generate_html_report(data, output_path):
                 const motifY = 85 + (motif.track * 20);
                 const x1 = scale(motif.start);
                 const x2 = scale(motif.end);
-                const w = Math.max(1, x2 - x1);
                 
                 let d;
-                if (w < 8) {{
-                    d = `M${{x1}},${{motifY}} h${{w}} v10 h-${{w}} z`;
+                if (motif.strand === '+') {{
+                    d = `M${{x1}},${{motifY}} L${{x2}},${{motifY + 5}} L${{x1}},${{motifY + 10}} Z`;
                 }} else {{
-                    if (motif.strand === '+') {{
-                        d = `M${{x1}},${{motifY}} h${{w-5}} l5,5 l-5,5 h-${{w-5}} z`;
-                    }} else {{
-                        d = `M${{x2}},${{motifY}} h-${{w-5}} l-5,5 l5,5 h${{w-5}} z`;
-                    }}
+                    d = `M${{x2}},${{motifY}} L${{x1}},${{motifY + 5}} L${{x2}},${{motifY + 10}} Z`;
                 }}
 
                 motifShape.setAttribute("d", d);
@@ -291,14 +307,21 @@ def run(config, common_settings):
     ranging_dir = common_settings.get('ranging', {}).get('output_dir')
     importance_dir = common_settings.get('importance', {}).get('output_dir')
     comparison_dir = common_settings.get('comparison', {}).get('output_dir')
-    ref_gff_file = common_settings.get('annotation', {}).get('reference_gff')
-    
-    filter_method = common_settings.get('annotation', {}).get('filter_method', 'q1q9')
+
+    ref_gff_file = config.get('reference_gff')
+    if not ref_gff_file:
+        ref_gff_file = common_settings.get('annotation', {}).get('reference_gff')
+
+    filter_method = common_settings.get('annotation', {}).get('filter_method', 'minmax')
     annotated_motifs_file = os.path.join(annotation_dir, f"annotated_motifs_{filter_method}.csv")
     importance_file = os.path.join(importance_dir, f"{common_settings.get('date', 'nodate')}_{common_settings.get('species_tag', 'unk')}{common_settings.get('model_tag', 'm0')}_contrib_scores.csv")
 
+    if not ref_gff_file or not os.path.exists(ref_gff_file):
+        print(f"Error: Reference GFF file not found at '{ref_gff_file}'.")
+        return
+
     if not os.path.exists(annotated_motifs_file):
-        print("Error: Annotated motifs file not found. Skipping report generation.")
+        print(f"Error: Annotated motifs file not found at '{annotated_motifs_file}'. Skipping report generation.")
         return
 
     # --- 2. Load Data and Select Target Gene(s) ---
@@ -317,16 +340,20 @@ def run(config, common_settings):
         with open(target_gene_list_path, 'r') as f:
             genes_to_process = [line.strip() for line in f if line.strip()]
     else:
-        # Default to the first gene if no list is provided
         genes_to_process.append(annotated_df['gene_id'].iloc[0])
 
     print(f"Will generate reports for: {genes_to_process}")
 
+    annotated_df['gene_id_norm'] = _normalize_gene_id(annotated_df['gene_id'])
+
     # --- Main loop to generate a report for each gene ---
-    for target_gene_id in genes_to_process:
+    for target_gene_id_raw in genes_to_process:
+        target_gene_id = re.sub(r'\.\d+$', '', target_gene_id_raw)
+        target_gene_id = re.sub(r'^gene:', '', target_gene_id)
         print(f"\n--- Generating report for gene: {target_gene_id} ---")
         
-        target_motifs_df = annotated_df[annotated_df['gene_id'] == target_gene_id].copy()
+        target_motifs_df = annotated_df[annotated_df['gene_id_norm'] == target_gene_id].copy()
+        
         if target_motifs_df.empty:
             print(f"Warning: No annotated motifs found for gene '{target_gene_id}'. Skipping report.")
             continue
@@ -335,22 +362,43 @@ def run(config, common_settings):
         print(f"Loading features for {target_gene_id} from GFF...")
         gff_df = _load_gff(ref_gff_file)
         
-        gene_info = gff_df[(gff_df['gene_id'] == target_gene_id) & (gff_df['type'] == 'gene')]
+        # Find the main gene entry using its normalized ID
+        gff_df['gene_id_attr_norm'] = _normalize_gene_id(gff_df['gene_id_attr'])
+        gene_info = gff_df[(gff_df['gene_id_attr_norm'] == target_gene_id) & (gff_df['type'] == 'gene')]
+        
         if gene_info.empty:
             print(f"Error: Could not find gene '{target_gene_id}' in GFF file.")
             continue
             
+        gene_gff_id = gene_info['id'].iloc[0]
         gene_start, gene_end = gene_info['start'].iloc[0], gene_info['end'].iloc[0]
         gene_chr = gene_info['seqid'].iloc[0]
         gene_strand = gene_info['strand'].iloc[0]
         
-        exon_info = gff_df[(gff_df['gene_id'] == target_gene_id) & (gff_df['type'] == 'exon')]
+        # Find all transcripts whose Parent is the gene's GFF ID
+        all_transcripts = gff_df[(gff_df['parent_id'] == gene_gff_id) & (gff_df['type'] == 'mRNA')]
+        
+        if all_transcripts.empty:
+            print(f"Warning: No mRNA transcripts found for gene '{target_gene_id}'. No features will be displayed.")
+            feature_info = pd.DataFrame()
+        else:
+            # Select the LONGEST transcript variant
+            all_transcripts['length'] = all_transcripts['end'] - all_transcripts['start']
+            longest_transcript = all_transcripts.loc[all_transcripts['length'].idxmax()]
+            selected_transcript_id = longest_transcript['id']
+            
+            print(f"Found {len(all_transcripts)} transcript(s). Using the longest, '{selected_transcript_id}', for visualization.")
+            
+            # Find all features whose Parent is the selected transcript's ID, excluding CDS
+            feature_types = ['exon', 'five_prime_UTR', 'three_prime_UTR']
+            feature_info = gff_df[(gff_df['parent_id'] == selected_transcript_id) & (gff_df['type'].isin(feature_types))]
+            print(f"Found {len(feature_info)} features (exons, UTRs) for this transcript.")
 
         # --- 4. Prepare Data for Visualization and Table ---
         target_motifs_df.sort_values('gen_mstart', inplace=True)
         tracks = []
-        view_start = gene_start - 1000
-        view_end = gene_end + 1000
+        view_start = gene_start - 1500
+        view_end = gene_end + 1500
         padding = (view_end - view_start) * 0.005
 
         for index, motif in target_motifs_df.iterrows():
@@ -371,8 +419,9 @@ def run(config, common_settings):
         target_motifs_df['color'] = target_motifs_df['motif'].map(color_map)
 
         # --- 5. Assemble data into a JSON-compatible dictionary ---
-        db_names = [d.name for d in Path(comparison_dir).iterdir() if d.is_dir()]
-        print(f"Found comparison results for databases: {db_names}")
+        db_names = [d.name for d in Path(comparison_dir).iterdir() if d.is_dir()] if os.path.exists(comparison_dir) else []
+        if db_names:
+            print(f"Found comparison results for databases: {db_names}")
 
         report_data = {
             'gene_id': target_gene_id,
@@ -380,11 +429,11 @@ def run(config, common_settings):
             'view_start': int(view_start),
             'view_end': int(view_end),
             'gene': {'start': int(gene_start), 'end': int(gene_end), 'strand': gene_strand},
-            'exons': [{'start': int(r['start']), 'end': int(r['end'])} for _, r in exon_info.iterrows()],
+            'features': [{'start': int(r['start']), 'end': int(r['end']), 'type': r['type']} for _, r in feature_info.iterrows()],
             'motifs_viz': [{'id': r['motif'], 'start': int(r['gen_mstart']), 'end': int(r['gen_mend']), 
                             'score': r['score'], 'track': int(r['track']), 'color': r['color'], 'strand': r['strand']} 
                            for _, r in target_motifs_df.iterrows()],
-            'max_track': int(target_motifs_df['track'].max()) if not target_motifs_df.empty else 0,
+            'max_track': int(target_motifs_df['track'].max()) if not target_motifs_df.empty and 'track' in target_motifs_df.columns else 0,
             'total_motifs': len(target_motifs_df),
             'db_names': db_names,
             'motifs_table': []
@@ -394,12 +443,13 @@ def run(config, common_settings):
             motif_id = row['motif']
             is_reverse = 'R_' in motif_id
             base_motif_id = motif_id.replace('R_', 'F_')
-            motif_short_name = re.search(r'(p\d+m\d+)', base_motif_id).group(1) if re.search(r'(p\d+m\d+)', base_motif_id) else ""
+            motif_short_name_match = re.search(r'(p\d+m\d+)', base_motif_id)
+            motif_short_name = motif_short_name_match.group(1) if motif_short_name_match else ""
             
-            logo_fwd_path = os.path.join(viz_dir, f"{base_motif_id}.png")
-            logo_rev_path = os.path.join(viz_dir, f"{base_motif_id.replace('F_', 'R_')}.png")
-            range_plot_path = os.path.join(ranging_dir, 'distribution_plots', f"epm_{common_settings['species_tag']}_{common_settings['model_tag']}_{motif_short_name}_density.png")
-            
+            logo_fwd_path = os.path.join(viz_dir, f"{base_motif_id}.png") if viz_dir else None
+            logo_rev_path = os.path.join(viz_dir, f"{base_motif_id.replace('F_', 'R_')}.png") if viz_dir else None
+            range_plot_path = os.path.join(ranging_dir, 'distribution_plots', f"epm_{common_settings.get('species_tag', 'unk')}_{common_settings.get('model_tag', 'm0')}_{motif_short_name}_density.png") if ranging_dir and motif_short_name else None
+
             importance_score = 0.0
             if importance_df is not None:
                 score_row = importance_df[importance_df['motif'] == motif_id]
@@ -408,7 +458,6 @@ def run(config, common_settings):
             
             matches = {db_name: get_top_match(motif_id, comparison_dir, db_name) for db_name in db_names}
             
-            # Swap the logos if the motif is a reverse match
             if is_reverse:
                 fwd_logo_for_display = image_to_base64(logo_rev_path)
                 rev_logo_for_display = image_to_base64(logo_fwd_path)

@@ -72,7 +72,7 @@ def run(config, common_settings):
     ref_genome_gff = config.get('reference_gff')
     
     flank_size = config.get('flank_size', 1000)
-    p_value_threshold = config.get('p_value_threshold', 0.001)
+    p_value_threshold = config.get('p_value_threshold', 0.0001)
     
     split_occurrences = config.get('split_occurrences', True)
     split_line_count = config.get('split_line_count', 10000000)

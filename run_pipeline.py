@@ -1,19 +1,9 @@
-<<<<<<< HEAD
-# ==================================================================
-# File: run_pipeline.py (Corrected and Consolidated Version)
-# ==================================================================
-=======
->>>>>>> 6194d07 (Initial commit with corrected .gitignore)
 import argparse
 import yaml
 import os
 import sys
 from datetime import datetime
 import importlib
-<<<<<<< HEAD
-import importlib.util
-=======
->>>>>>> 6194d07 (Initial commit with corrected .gitignore)
 
 def load_config(config_path):
     """Loads and validates the YAML configuration file."""
@@ -21,16 +11,6 @@ def load_config(config_path):
     if not os.path.exists(config_path):
         print(f"Error: Configuration file not found at {config_path}")
         sys.exit(1)
-<<<<<<< HEAD
-
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-
-    if 'run_name' not in config:
-        print("Error: Config file must contain 'run_name'.")
-        sys.exit(1)
-
-=======
         
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
@@ -39,7 +19,6 @@ def load_config(config_path):
         print("Error: Config file must contain 'run_name'.")
         sys.exit(1)
         
->>>>>>> 6194d07 (Initial commit with corrected .gitignore)
     return config
 
 def setup_directories(config):
@@ -47,70 +26,32 @@ def setup_directories(config):
     run_name = config['run_name']
     results_dir = os.path.join('results', run_name)
     os.makedirs(results_dir, exist_ok=True)
-<<<<<<< HEAD
-
-    # Updated to include all potential steps for directory creation
-    all_steps = ['nomenclature', 'visualization', 'comparison', 'importance', 'saliency',
-                 'clustering', 'ranging', 'projection', 'annotation', 'browser_viz', 'performance', 'logs']
-
-=======
     
     # The 'trimming' step is now part of 'nomenclature', so it's removed from this list
     all_steps = ['nomenclature', 'visualization', 'comparison', 'importance', 'saliency', 
-                 'clustering', 'ranging', 'projection', 'annotation', 'browser_viz', 'performance', 'logs']
+                 'clustering', 'ranging', 'projection', 'annotation', 'performance', 'logs']
     
->>>>>>> 6194d07 (Initial commit with corrected .gitignore)
     for step_name in all_steps:
         step_dir = os.path.join(results_dir, step_name)
         os.makedirs(step_dir, exist_ok=True)
         if step_name not in config:
             config[step_name] = {}
         config[step_name]['output_dir'] = step_dir
-<<<<<<< HEAD
-
-=======
         
->>>>>>> 6194d07 (Initial commit with corrected .gitignore)
     print(f"Results will be saved in: {results_dir}")
     return config
 
 def run_step(step_name, step_number, total_steps, config, common_settings):
-<<<<<<< HEAD
-    """Dynamically imports and runs a pipeline step, with caching and specialization."""
-=======
     """Dynamically imports and runs a pipeline step, with caching."""
->>>>>>> 6194d07 (Initial commit with corrected .gitignore)
     if not config.get(step_name, {}).get('run'):
         print(f"\n[Step {step_number}/{total_steps}] Skipping {step_name.capitalize()} (disabled in config).")
         return
 
-<<<<<<< HEAD
-    # --- Dependency checks can be added here if needed ---
-
-    print(f"\n[Step {step_number}/{total_steps}] Running {step_name.capitalize()}...")
-
-    try:
-        # FIX 1: Logic to switch modules based on analysis_type
-        analysis_type = common_settings.get('analysis_type', 'whole_genome')
-
-        # FIX 2: Correct, straightforward module naming
-        module_name = f"moca.steps.step{step_number}_{step_name}"
-
-        # If the analysis is 'pre_extracted', check if a specialized script exists
-        if analysis_type == 'pre_extracted' and step_name in ['annotation', 'browser_viz']:
-            specialized_module_name = f"{module_name}_specialized"
-            # Use find_spec to check for module existence without importing it immediately
-            if importlib.util.find_spec(specialized_module_name):
-                module_name = specialized_module_name
-                print(f"--> Using specialized script for pre-extracted data: {module_name}")
-            else:
-                print(f"--> Note: Specialized script '{specialized_module_name}' not found. Using standard '{module_name}'.")
-
-=======
     # --- Caching Logic ---
     force_rerun = common_settings.get('force_rerun', False)
     output_dir = config[step_name]['output_dir']
     
+    # Define the key output file for each step to check for existence
     expected_outputs = {
         'nomenclature': [os.path.join(output_dir, f"{common_settings.get('nomenclature_prefix', 'epm')}_{common_settings.get('species_tag', 'unk')}_{common_settings.get('model_tag', 'm0')}_{config.get('nomenclature', {}).get('matrix_type', 'PFM').lower()}-motifs_raw.jaspar")],
         'ranging': [os.path.join(output_dir, f"{common_settings.get('species_tag', 'unk')}{common_settings.get('model_tag', 'm0')}-TSS_motif_ranges.csv")],
@@ -118,13 +59,19 @@ def run_step(step_name, step_number, total_steps, config, common_settings):
         'annotation': [os.path.join(output_dir, f"annotated_motifs_{config.get('annotation', {}).get('filter_method', 'q1q9')}.csv")]
     }
 
+    # Check if the step can be skipped
     if not force_rerun and step_name in expected_outputs:
+        # For nomenclature, also check for the trimmed file if it's supposed to be created
         if step_name == 'nomenclature' and config.get('nomenclature', {}).get('trim_motifs'):
-            prefix, species, model, matrix_type = (common_settings.get(k, v) for k, v in [('nomenclature_prefix', 'epm'), ('species_tag', 'unk'), ('model_tag', 'm0'), ('matrix_type', 'PFM')])
+            prefix = common_settings.get('nomenclature_prefix', 'epm')
+            species = common_settings.get('species_tag', 'unk')
+            model = common_settings.get('model_tag', 'm0')
+            matrix_type = config.get('nomenclature', {}).get('matrix_type', 'PFM').upper()
             expected_outputs['nomenclature'].append(os.path.join(output_dir, f"{prefix}_{species}_{model}_{matrix_type.lower()}-motifs_trimmed.jaspar"))
 
         if all(os.path.exists(f) for f in expected_outputs[step_name]):
             print(f"\n[Step {step_number}/{total_steps}] Skipping {step_name.capitalize()} (output files already exist).")
+            # Ensure necessary paths are still added to the config for downstream steps
             if step_name == 'nomenclature':
                 config['nomenclature']['output_file_raw'] = expected_outputs['nomenclature'][0]
                 if config.get('nomenclature', {}).get('trim_motifs'):
@@ -138,8 +85,7 @@ def run_step(step_name, step_number, total_steps, config, common_settings):
         'clustering': 'nomenclature',
         'projection': 'nomenclature',
         'annotation': ['projection', 'ranging'],
-        'browser_viz': 'annotation',
-        'performance': 'annotation'
+        'browser_viz': 'annotation'
     }
     
     deps_to_check = dependencies.get(step_name, [])
@@ -153,20 +99,15 @@ def run_step(step_name, step_number, total_steps, config, common_settings):
     print(f"\n[Step {step_number}/{total_steps}] Running {step_name.capitalize()}...")
     
     try:
+        # Construct the module name using the correct step number
         module_name = f"moca.steps.step{step_number}_{step_name}"
->>>>>>> 6194d07 (Initial commit with corrected .gitignore)
         step_module = importlib.import_module(module_name)
         step_module.run(config=config[step_name], common_settings=common_settings)
 
     except ImportError as e:
         print(f"--- FATAL ERROR ---")
         print(f"Could not import the module for step: '{step_name}'.")
-<<<<<<< HEAD
-        print(f"Looked for module: '{module_name}'")
-        print(f"Please ensure the corresponding .py file exists in the 'moca/steps/' directory.")
-=======
         print(f"Please ensure the file 'moca/steps/step{step_number}_{step_name}.py' exists and is correct.")
->>>>>>> 6194d07 (Initial commit with corrected .gitignore)
         print(f"Details: {e}")
         sys.exit(1)
     except Exception as e:
@@ -189,28 +130,16 @@ def main():
     print(f"\n--- Starting Pipeline Run: {config['run_name']} ---")
     start_time = datetime.now()
 
-<<<<<<< HEAD
-    # Define the pipeline steps in order
-    pipeline_steps = [
-        'nomenclature', 'visualization', 'comparison', 'importance',
-        'saliency', 'clustering', 'ranging', 'projection',
-        'annotation', 'browser_viz', 'performance'
-    ]
-
-    total_steps = len(pipeline_steps)
-    for i, step_name in enumerate(pipeline_steps):
-        # Step numbers should be 1-based
-=======
-    # Updated list of steps in the correct order
+    # *** FIX: Removed 'trimming' from the pipeline steps list ***
     pipeline_steps = [
         'nomenclature', 'visualization', 'comparison', 'importance', 
         'saliency', 'clustering', 'ranging', 'projection', 
-        'annotation', 'browser_viz', 'performance'
+        'annotation', 'browser_viz'
     ]
     
     total_steps = len(pipeline_steps)
     for i, step_name in enumerate(pipeline_steps):
->>>>>>> 6194d07 (Initial commit with corrected .gitignore)
+        # The step number (i+1) will now correctly match the script filenames
         run_step(step_name, i + 1, total_steps, config, config)
 
     end_time = datetime.now()

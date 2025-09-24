@@ -15,13 +15,39 @@ def _normalize_gene_id(series):
         return None
     return series.str.replace('^gene:', '', regex=True).str.replace(r'\.\d+$', '', regex=True)
 
+def _get_deepcre_pos(genomic_pos, tss, tts, gene_strand):
+    """Calculates the deepCRE coordinate (1-3000) for a given genomic position."""
+    try:
+        genomic_pos, tss, tts = int(genomic_pos), int(tss), int(tts)
+    except (ValueError, TypeError):
+        return None
+
+    if gene_strand == '+':
+        if tss - 1000 <= genomic_pos < tss:
+            return (genomic_pos - (tss - 1000)) + 1
+        elif tss <= genomic_pos < tss + 500:
+            return (genomic_pos - tss) + 1001
+        elif tts - 500 <= genomic_pos < tts:
+            return (genomic_pos - (tts - 500)) + 1501
+        elif tts <= genomic_pos < tts + 1000:
+            return (genomic_pos - tts) + 2001
+    else:  # gene_strand == '-'
+        if tss < genomic_pos <= tss + 1000:
+            return (tss + 1000 - genomic_pos) + 1
+        elif tss - 500 < genomic_pos <= tss:
+            return (tss - genomic_pos) + 1001
+        elif tts < genomic_pos <= tts + 500:
+            return (tts + 500 - genomic_pos) + 1501
+        elif tts - 1000 < genomic_pos <= tts:
+            return (tts - genomic_pos) + 2001
+    return None
+
 def _load_gff(filepath):
     """Loads a GFF/GTF file, parsing it into a pandas DataFrame."""
     try:
         col_names = ['seqid', 'source', 'type', 'start', 'end', 'score', 'strand', 'phase', 'attributes']
         df = pd.read_csv(filepath, sep='\t', comment='#', header=None, names=col_names, low_memory=False)
         
-        # Extract ID, Parent, and a potential gene_id from the attributes for linking
         df['id'] = df['attributes'].str.extract(r'ID=([^;]+)', expand=False)
         df['parent_id'] = df['attributes'].str.extract(r'Parent=([^;]+)', expand=False)
         df['gene_id_attr'] = df['attributes'].str.extract(r'gene_id=([^;]+)', expand=False)
@@ -79,7 +105,7 @@ def generate_html_report(data, output_path):
                     <td class="plot-cell"><img src="{motif['range_plot']}" alt="Range Plot"></td>
                     <td>{motif['importance']:.4f}</td>
                     <td>{motif['position']}</td>
-                    <td>{motif['distance']}</td>
+                    <td>{motif['deepcre_pos']}</td>
                     <td>{motif['strand']}</td>
                     {db_matches_html}
                 </tr>
@@ -92,19 +118,19 @@ def generate_html_report(data, output_path):
     <meta charset="UTF-8">
     <title>MOCA Report: {data['gene_id']}</title>
     <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 2em; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 2em; background-color: #fdfdfd; }}
         h1, h2, h3 {{ color: #333; }}
-        #chart-container {{ width: 100%; overflow-x: auto; border: 1px solid #ccc; background-color: #f9f9f9; margin-bottom: 2em;}}
+        #chart-container {{ width: 100%; overflow-x: auto; border: 1px solid #ccc; background-color: #f9f9f9; margin-bottom: 2em; }}
         svg {{ min-width: 100%; }}
         .gene-backbone {{ stroke: #555; stroke-width: 2; }}
         .feature {{ cursor: pointer; }}
-        .exon {{ fill: #B0B0B0; stroke: #888888; }} /* Light Grey for Exons */
-        .CDS {{ fill: #666666; stroke: #444444; }} /* Dark Grey for CDS */
-        .five_prime_UTR, .three_prime_UTR {{ fill: #E0E0E0; stroke: #C0C0C0; }} /* Very Light Grey for UTRs */
-        .motif {{ cursor: pointer; }}
-        .axis-line {{ stroke: #aaa; stroke-width: 1; }}
-        .axis-tick {{ stroke: #aaa; stroke-width: 1; }}
-        .axis-label {{ font-size: 10px; fill: #555; }}
+        .exon {{ fill: #666666; stroke: #444444; }}
+        .CDS {{ fill: #666666; stroke: #444444; }}
+        .five_prime_UTR, .three_prime_UTR {{ fill: #a0a0a0; stroke: #888888; }}
+        .motif-group {{ cursor: pointer; }}
+        .axis-line, .axis-tick {{ stroke: #aaa; stroke-width: 1; }}
+        .axis-label {{ font-size: 12px; fill: #555; }}
+        .deepcre-axis-segment {{ stroke: #333; stroke-width: 1.5; }}
         .tooltip {{ position: absolute; visibility: hidden; background: rgba(0, 0, 0, 0.8); color: #fff; padding: 8px; border-radius: 4px; font-size: 12px; pointer-events: none; white-space: pre; transition: opacity 0.2s; z-index: 10; }}
         table {{ border-collapse: collapse; width: 100%; margin-top: 20px; font-size: 12px; }}
         th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: middle; }}
@@ -133,7 +159,7 @@ def generate_html_report(data, output_path):
                 <th>Positional Density</th>
                 <th>Importance Score</th>
                 <th>Genomic Position</th>
-                <th>Distance to Border</th>
+                <th>deepCRE Position</th>
                 <th>Match Strand</th>
                 {db_headers}
             </tr>
@@ -153,9 +179,9 @@ def generate_html_report(data, output_path):
             document.getElementById('gene-strand').textContent = data.gene.strand;
             document.getElementById('motif-count').textContent = data.total_motifs;
 
-            const margin = {{ top: 20, right: 50, bottom: 40, left: 50 }};
-            const width = container.clientWidth - margin.left - margin.right;
-            const height = 120 + (data.max_track * 30);
+            const margin = {{ top: 60, right: 50, bottom: 60, left: 50 }};
+            const width = Math.max(container.clientWidth, 1200) - margin.left - margin.right;
+            const height = 120 + (data.max_track * 25);
 
             const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
             svg.setAttribute("width", width + margin.left + margin.right);
@@ -167,43 +193,10 @@ def generate_html_report(data, output_path):
             container.appendChild(svg);
 
             const scale = (pos) => ((pos - data.view_start) / (data.view_end - data.view_start)) * width;
-
-            // Draw axis
-            const axisY = height - 20;
-            const axisLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
-            axisLine.setAttribute("x1", 0);
-            axisLine.setAttribute("y1", axisY);
-            axisLine.setAttribute("x2", width);
-            axisLine.setAttribute("y2", axisY);
-            axisLine.classList.add("axis-line");
-            g.appendChild(axisLine);
-
-            const numTicks = 10;
-            for (let i = 0; i <= numTicks; i++) {{
-                const pos = data.view_start + i * (data.view_end - data.view_start) / numTicks;
-                const x = scale(pos);
-                
-                const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                tick.setAttribute("x1", x);
-                tick.setAttribute("y1", axisY);
-                tick.setAttribute("x2", x);
-                tick.setAttribute("y2", axisY + 5);
-                tick.classList.add("axis-tick");
-                g.appendChild(tick);
-
-                const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-                label.setAttribute("x", x);
-                label.setAttribute("y", axisY + 20);
-                label.setAttribute("text-anchor", "middle");
-                label.classList.add("axis-label");
-                label.textContent = Math.round(pos); // Changed label to show bp instead of kb
-                g.appendChild(label);
-            }}
-
             const tooltip = document.getElementById('tooltip');
 
             // Draw gene model
-            const geneY = 60;
+            const geneY = 40;
             const backbone = document.createElementNS("http://www.w3.org/2000/svg", "line");
             backbone.setAttribute("x1", scale(data.gene.start));
             backbone.setAttribute("y1", geneY);
@@ -211,40 +204,21 @@ def generate_html_report(data, output_path):
             backbone.setAttribute("y2", geneY);
             backbone.classList.add("gene-backbone");
             g.appendChild(backbone);
-
-            const numArrows = Math.floor((scale(data.gene.end) - scale(data.gene.start)) / 50);
-            for (let i = 1; i < numArrows; i++) {{
-                const arrowPos = scale(data.gene.start) + i * 50;
-                const arrow = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                const arrowDir = data.gene.strand === '+' ? `M${{arrowPos-3}},${{geneY-3}} L${{arrowPos}},${{geneY}} L${{arrowPos-3}},${{geneY+3}}` : `M${{arrowPos+3}},${{geneY-3}} L${{arrowPos}},${{geneY}} L${{arrowPos+3}},${{geneY+3}}`;
-                arrow.setAttribute("d", arrowDir);
-                arrow.setAttribute("stroke", "#555");
-                arrow.setAttribute("stroke-width", "1.5");
-                arrow.setAttribute("fill", "none");
-                g.appendChild(arrow);
-            }}
-
+            
             data.features.forEach(feature => {{
                 const featureRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-                featureRect.setAttribute("x", scale(feature.start));
-                const featureWidth = scale(feature.end) - scale(feature.start);
+                const x = scale(feature.start);
+                const featureWidth = scale(feature.end) - x;
+                featureRect.setAttribute("x", x);
                 featureRect.setAttribute("width", Math.max(1, featureWidth));
-                featureRect.classList.add("feature");
-                featureRect.classList.add(feature.type);
-
-                // Adjust height and Y position based on feature type
-                if (feature.type === 'CDS') {{
-                    featureRect.setAttribute("y", geneY - 7.5);
-                    featureRect.setAttribute("height", 15);
-                }} else {{ // UTRs and Exons
-                    featureRect.setAttribute("y", geneY - 5);
-                    featureRect.setAttribute("height", 10);
-                }}
+                featureRect.setAttribute("class", `feature ${{feature.type}}`);
+                const featureHeight = (feature.type === 'CDS' || feature.type === 'exon') ? 15 : 10;
+                featureRect.setAttribute("y", geneY - featureHeight / 2);
+                featureRect.setAttribute("height", featureHeight);
                 g.appendChild(featureRect);
-
                 featureRect.addEventListener('mouseover', (event) => {{
                     tooltip.style.visibility = 'visible';
-                    tooltip.innerHTML = `<b>${{feature.type.replace('_', ' ')}}</b>\\n<b>Position:</b> ${{feature.start}} - ${{feature.end}}`;
+                    tooltip.innerHTML = `<b>${{feature.type.replace('_', ' ')}}</b>\\n<b>Position:</b> ${{feature.start.toLocaleString()}} - ${{feature.end.toLocaleString()}}`;
                 }});
                 featureRect.addEventListener('mousemove', (event) => {{
                     tooltip.style.top = (event.pageY - 10) + 'px';
@@ -254,44 +228,149 @@ def generate_html_report(data, output_path):
                     tooltip.style.visibility = 'hidden';
                 }});
             }});
+            
+            data.gene_labels.forEach(label => {{
+                const labelText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                labelText.setAttribute("x", scale(label.pos));
+                labelText.setAttribute("y", geneY - 25);
+                labelText.setAttribute("text-anchor", "middle");
+                labelText.setAttribute("font-size", "12px");
+                labelText.setAttribute("font-weight", "bold");
+                labelText.textContent = label.text;
+                g.appendChild(labelText);
+            }});
 
             // Draw motifs
             data.motifs_viz.forEach(motif => {{
-                const motifShape = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                const motifY = 85 + (motif.track * 20);
+                const motifGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                motifGroup.classList.add("motif-group");
+                const motifY = 65 + (motif.track * 20);
                 const x1 = scale(motif.start);
                 const x2 = scale(motif.end);
-                
-                let d;
-                if (motif.strand === '+') {{
-                    d = `M${{x1}},${{motifY}} L${{x2}},${{motifY + 5}} L${{x1}},${{motifY + 10}} Z`;
-                }} else {{
-                    d = `M${{x2}},${{motifY}} L${{x1}},${{motifY + 5}} L${{x2}},${{motifY + 10}} Z`;
-                }}
-
-                motifShape.setAttribute("d", d);
-                motifShape.setAttribute("fill", motif.color);
-                motifShape.classList.add("motif");
-                g.appendChild(motifShape);
-
-                motifShape.addEventListener('mouseover', (event) => {{
+                const motifPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                const d = `M${{x1}},${{motifY}} L${{x2}},${{motifY}}`;
+                motifPath.setAttribute("d", d);
+                motifPath.setAttribute("stroke", motif.color);
+                motifPath.setAttribute("stroke-width", "5");
+                motifGroup.appendChild(motifPath);
+                const arrow = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                const arrowD = motif.strand === '+' ? `M${{x2-5}},${{motifY-4}} L${{x2}},${{motifY}} L${{x2-5}},${{motifY+4}}` : `M${{x1+5}},${{motifY-4}} L${{x1}},${{motifY}} L${{x1+5}},${{motifY+4}}`;
+                arrow.setAttribute("d", arrowD);
+                arrow.setAttribute("fill", motif.color);
+                motifGroup.appendChild(arrow);
+                g.appendChild(motifGroup);
+                motifGroup.addEventListener('mouseover', (event) => {{
                     tooltip.style.visibility = 'visible';
-                    tooltip.innerHTML = `<b>Motif:</b> ${{motif.id}}\\n<b>Score:</b> ${{motif.score.toFixed(2)}}\\n<b>Position:</b> ${{motif.start}} - ${{motif.end}}\\n<b>Strand:</b> ${{motif.strand}}`;
+                    tooltip.innerHTML = `<b>Motif:</b> ${{motif.id}}\\n<b>Score:</b> ${{motif.score.toFixed(2)}}\\n<b>Position:</b> ${{motif.start.toLocaleString()}} - ${{motif.end.toLocaleString()}}\\n<b>Strand:</b> ${{motif.strand}}`;
                 }});
-                motifShape.addEventListener('mousemove', (event) => {{
+                motifGroup.addEventListener('mousemove', (event) => {{
                     tooltip.style.top = (event.pageY - 10) + 'px';
                     tooltip.style.left = (event.pageX + 10) + 'px';
                 }});
-                motifShape.addEventListener('mouseout', () => {{
+                motifGroup.addEventListener('mouseout', () => {{
                     tooltip.style.visibility = 'hidden';
                 }});
+            }});
+
+            // --- Draw Top Genomic Axis ---
+            const topAxisY = -30;
+            const topAxisLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            topAxisLine.setAttribute("x1", 0);
+            topAxisLine.setAttribute("y1", topAxisY);
+            topAxisLine.setAttribute("x2", width);
+            topAxisLine.setAttribute("y2", topAxisY);
+            topAxisLine.classList.add("axis-line");
+            g.appendChild(topAxisLine);
+
+            const viewRange = data.view_end - data.view_start;
+            const topTickInterval = Math.pow(10, Math.floor(Math.log10(viewRange)) - 1) * 5;
+            let topCurrentPos = Math.ceil(data.view_start / topTickInterval) * topTickInterval;
+            
+            while (topCurrentPos <= data.view_end) {{
+                const x = scale(topCurrentPos);
+                const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                tick.setAttribute("x1", x);
+                tick.setAttribute("y1", topAxisY);
+                tick.setAttribute("x2", x);
+                tick.setAttribute("y2", topAxisY - 5);
+                tick.classList.add("axis-tick");
+                g.appendChild(tick);
+
+                const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                label.setAttribute("x", x);
+                label.setAttribute("y", topAxisY - 10);
+                label.setAttribute("text-anchor", "middle");
+                label.classList.add("axis-label");
+                label.textContent = topCurrentPos.toLocaleString();
+                g.appendChild(label);
+                
+                topCurrentPos += topTickInterval;
+            }}
+
+            // --- Draw Bottom deepCRE Axis ---
+            const bottomAxisY = height;
+            const tss = data.tss_pos;
+            const tts = data.tts_pos;
+            const geneStrand = data.gene.strand;
+
+            const keyPoints = [];
+            if (geneStrand === '+') {{
+                keyPoints.push({{ pos: tss - 1000, label: "1" }});
+                keyPoints.push({{ pos: tss, label: "1001" }});
+                keyPoints.push({{ pos: tss + 500, label: "1500" }});
+                keyPoints.push({{ pos: tts - 500, label: "1501" }});
+                keyPoints.push({{ pos: tts, label: "2001" }});
+                keyPoints.push({{ pos: tts + 1000, label: "3000" }});
+            }} else {{ // strand is '-'
+                keyPoints.push({{ pos: tss + 1000, label: "1" }});
+                keyPoints.push({{ pos: tss, label: "1001" }});
+                keyPoints.push({{ pos: tss - 500, label: "1500" }});
+                keyPoints.push({{ pos: tts + 500, label: "1501" }});
+                keyPoints.push({{ pos: tts, label: "2001" }});
+                keyPoints.push({{ pos: tts - 1000, label: "3000" }});
+            }}
+
+            const drawSegment = (startPos, endPos) => {{
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute("x1", scale(startPos));
+                line.setAttribute("y1", bottomAxisY);
+                line.setAttribute("x2", scale(endPos));
+                line.setAttribute("y2", bottomAxisY);
+                line.classList.add("deepcre-axis-segment");
+                g.appendChild(line);
+            }};
+
+            drawSegment(keyPoints[0].pos, keyPoints[1].pos); // Upstream
+            drawSegment(keyPoints[1].pos, keyPoints[2].pos); // Gene Start
+            drawSegment(keyPoints[3].pos, keyPoints[4].pos); // Gene End
+            drawSegment(keyPoints[4].pos, keyPoints[5].pos); // Downstream
+
+            keyPoints.forEach(point => {{
+                if (point.pos >= data.view_start && point.pos <= data.view_end) {{
+                    const x = scale(point.pos);
+                    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    tick.setAttribute("x1", x);
+                    tick.setAttribute("y1", bottomAxisY);
+                    tick.setAttribute("x2", x);
+                    tick.setAttribute("y2", bottomAxisY + 5);
+                    tick.classList.add("axis-tick");
+                    g.appendChild(tick);
+                    
+                    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    label.setAttribute("x", x);
+                    label.setAttribute("y", bottomAxisY + 20);
+                    label.setAttribute("text-anchor", "middle");
+                    label.classList.add("axis-label");
+                    label.textContent = point.label;
+                    g.appendChild(label);
+                }}
             }});
         }});
     </script>
 </body>
 </html>
     """
-    with open(output_path, 'w') as f:
+    with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html_template)
 
 def run(config, common_settings):
@@ -362,7 +441,6 @@ def run(config, common_settings):
         print(f"Loading features for {target_gene_id} from GFF...")
         gff_df = _load_gff(ref_gff_file)
         
-        # Find the main gene entry using its normalized ID
         gff_df['gene_id_attr_norm'] = _normalize_gene_id(gff_df['gene_id_attr'])
         gene_info = gff_df[(gff_df['gene_id_attr_norm'] == target_gene_id) & (gff_df['type'] == 'gene')]
         
@@ -375,24 +453,29 @@ def run(config, common_settings):
         gene_chr = gene_info['seqid'].iloc[0]
         gene_strand = gene_info['strand'].iloc[0]
         
-        # Find all transcripts whose Parent is the gene's GFF ID
+        # Define TSS (Transcription Start Site) and TTS (Transcription Termination Site)
+        if gene_strand == '+':
+            tss_pos = gene_start
+            tts_pos = gene_end
+        else:
+            tss_pos = gene_end
+            tts_pos = gene_start
+        
         all_transcripts = gff_df[(gff_df['parent_id'] == gene_gff_id) & (gff_df['type'] == 'mRNA')]
         
         if all_transcripts.empty:
             print(f"Warning: No mRNA transcripts found for gene '{target_gene_id}'. No features will be displayed.")
             feature_info = pd.DataFrame()
         else:
-            # Select the LONGEST transcript variant
             all_transcripts['length'] = all_transcripts['end'] - all_transcripts['start']
             longest_transcript = all_transcripts.loc[all_transcripts['length'].idxmax()]
             selected_transcript_id = longest_transcript['id']
             
             print(f"Found {len(all_transcripts)} transcript(s). Using the longest, '{selected_transcript_id}', for visualization.")
             
-            # Find all features whose Parent is the selected transcript's ID, excluding CDS
-            feature_types = ['exon', 'five_prime_UTR', 'three_prime_UTR']
+            feature_types = ['exon', 'CDS', 'five_prime_UTR', 'three_prime_UTR']
             feature_info = gff_df[(gff_df['parent_id'] == selected_transcript_id) & (gff_df['type'].isin(feature_types))]
-            print(f"Found {len(feature_info)} features (exons, UTRs) for this transcript.")
+            print(f"Found {len(feature_info)} features (Exons, CDS, UTRs) for this transcript.")
 
         # --- 4. Prepare Data for Visualization and Table ---
         target_motifs_df.sort_values('gen_mstart', inplace=True)
@@ -413,10 +496,34 @@ def run(config, common_settings):
                 tracks.append(motif['gen_mend'])
                 target_motifs_df.loc[index, 'track'] = len(tracks) - 1
 
+        print("Applying custom color scheme to motifs...")
         unique_motifs = target_motifs_df['motif'].unique()
-        colors = [f"hsl({(i * 360 / len(unique_motifs)) % 360}, 70%, 50%)" for i in range(len(unique_motifs))]
-        color_map = dict(zip(unique_motifs, colors))
+        color_map = {}
+        
+        p0_motifs = sorted([m for m in unique_motifs if '_p0' in m])
+        p1_motifs = sorted([m for m in unique_motifs if '_p1' in m])
+        other_motifs = sorted([m for m in unique_motifs if '_p0' not in m and '_p1' not in m])
+        
+        if p0_motifs:
+            p0_hues = np.linspace(0, 60, len(p0_motifs), endpoint=True)
+            for i, motif in enumerate(p0_motifs):
+                color_map[motif] = f"hsl({p0_hues[i]}, 90%, 50%)"
+                
+        if p1_motifs:
+            p1_hues = np.linspace(195, 255, len(p1_motifs), endpoint=True)
+            for i, motif in enumerate(p1_motifs):
+                color_map[motif] = f"hsl({p1_hues[i]}, 85%, 55%)"
+
+        if other_motifs:
+            other_lightness = np.linspace(40, 70, len(other_motifs), endpoint=True)
+            for i, motif in enumerate(other_motifs):
+                color_map[motif] = f"hsl(0, 0%, {other_lightness[i]:.0f}%)"
+        
         target_motifs_df['color'] = target_motifs_df['motif'].map(color_map)
+
+        print(f"Filtering motifs for visualization to match gene strand ('{gene_strand}')...")
+        viz_motifs_df = target_motifs_df[target_motifs_df['strand'] == gene_strand].copy()
+        print(f"Visualizing {len(viz_motifs_df)} of {len(target_motifs_df)} total motifs.")
 
         # --- 5. Assemble data into a JSON-compatible dictionary ---
         db_names = [d.name for d in Path(comparison_dir).iterdir() if d.is_dir()] if os.path.exists(comparison_dir) else []
@@ -429,16 +536,20 @@ def run(config, common_settings):
             'view_start': int(view_start),
             'view_end': int(view_end),
             'gene': {'start': int(gene_start), 'end': int(gene_end), 'strand': gene_strand},
+            'tss_pos': int(tss_pos),
+            'tts_pos': int(tts_pos),
             'features': [{'start': int(r['start']), 'end': int(r['end']), 'type': r['type']} for _, r in feature_info.iterrows()],
+            'gene_labels': [{'pos': (gene_start + gene_end) / 2, 'text': target_gene_id}],
             'motifs_viz': [{'id': r['motif'], 'start': int(r['gen_mstart']), 'end': int(r['gen_mend']), 
                             'score': r['score'], 'track': int(r['track']), 'color': r['color'], 'strand': r['strand']} 
-                           for _, r in target_motifs_df.iterrows()],
-            'max_track': int(target_motifs_df['track'].max()) if not target_motifs_df.empty and 'track' in target_motifs_df.columns else 0,
+                           for _, r in viz_motifs_df.iterrows()],
+            'max_track': int(viz_motifs_df['track'].max()) if not viz_motifs_df.empty and 'track' in viz_motifs_df.columns else 0,
             'total_motifs': len(target_motifs_df),
             'db_names': db_names,
             'motifs_table': []
         }
 
+        # Create the detailed table data
         for _, row in target_motifs_df.iterrows():
             motif_id = row['motif']
             is_reverse = 'R_' in motif_id
@@ -458,12 +569,12 @@ def run(config, common_settings):
             
             matches = {db_name: get_top_match(motif_id, comparison_dir, db_name) for db_name in db_names}
             
-            if is_reverse:
-                fwd_logo_for_display = image_to_base64(logo_rev_path)
-                rev_logo_for_display = image_to_base64(logo_fwd_path)
-            else:
-                fwd_logo_for_display = image_to_base64(logo_fwd_path)
-                rev_logo_for_display = image_to_base64(logo_rev_path)
+            fwd_logo_for_display = image_to_base64(logo_rev_path if is_reverse else logo_fwd_path)
+            rev_logo_for_display = image_to_base64(logo_fwd_path if is_reverse else logo_rev_path)
+
+            motif_midpoint = (row['gen_mstart'] + row['gen_mend']) / 2
+            deepcre_pos_val = _get_deepcre_pos(motif_midpoint, tss_pos, tts_pos, gene_strand)
+            deepcre_pos_str = f"{deepcre_pos_val:.0f}" if deepcre_pos_val is not None else "N/A"
 
             report_data['motifs_table'].append({
                 'id': motif_id,
@@ -472,7 +583,7 @@ def run(config, common_settings):
                 'range_plot': image_to_base64(range_plot_path),
                 'importance': importance_score,
                 'position': f"{row['gen_mstart']}-{row['gen_mend']}",
-                'distance': f"{row['dist_transc_border']}bp ({row['region']})",
+                'deepcre_pos': deepcre_pos_str,
                 'strand': row['strand'],
                 'matches': matches
             })

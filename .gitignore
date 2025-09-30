@@ -5,6 +5,15 @@ results/
 data/*
 !data/missing_directories
 
+configs/*
+!config_arabidopsis.yaml
+!config_test_specialized.yaml
+!gernot_genes.txt
+!requirements.txt
+!specialized_genes.txt
+
+.vscode/
+
 # Ignore Python cache files
 __pycache__/
 *.pyc

@@ -1,6 +1,10 @@
 # Ignore the results directory
 results/
 
+# Ignore all files in the data directory except for missing_directories
+data/*
+!data/missing_directories
+
 # Ignore Python cache files
 __pycache__/
 *.pyc

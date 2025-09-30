@@ -129,13 +129,17 @@ def run_step(step_name, step_number, total_steps, config, common_settings):
         print(f"Details: {e}")
         sys.exit(1)
 
-def main():
-    """Main function to orchestrate the MOCA pipeline."""
+
+def parse_args():
     parser = argparse.ArgumentParser(description="MOCA: Motif Characterization & Annotation Pipeline")
     parser.add_argument('--config', type=str, required=True, help='Path to the YAML configuration file for the pipeline run.')
     args = parser.parse_args()
+    config = args.config
+    return config
 
-    config = load_config(args.config)
+
+def pipeline(config_path: str):
+    config = load_config(config_path)
     if 'date' not in config:
         config['date'] = datetime.now().strftime('%Y%m%d')
     config = setup_directories(config)
@@ -158,6 +162,13 @@ def main():
     end_time = datetime.now()
     print(f"\n--- Pipeline Run Finished ---")
     print(f"Total execution time: {end_time - start_time}")
+
+
+def main():
+    """Main function to orchestrate the MOCA pipeline."""
+    config_path = parse_args()
+    pipeline(config_path)
+
 
 if __name__ == "__main__":
     main()

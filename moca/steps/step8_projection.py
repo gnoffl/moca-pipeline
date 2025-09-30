@@ -111,60 +111,57 @@ def run(config, common_settings):
 
     # --- 2. Run BLAMM Mapping ---
     print("\n--- Running BLAMM for motif mapping ---")
-    blamm_dir = os.path.dirname(blamm_path)
-    blamm_exec = os.path.basename(blamm_path)
-    
-    manifest_file_path = os.path.join(blamm_dir, 'sequences.mf')
+    manifest_file_path = os.path.join(output_dir, 'sequences.mf')
     print(f"Creating BLAMM manifest file at: {manifest_file_path}")
     with open(manifest_file_path, 'w') as mf:
         absolute_fasta_path = os.path.abspath(prepared_fasta_path)
         mf.write(f"group1 {absolute_fasta_path}\n")
 
-    dict_command = [f'./{blamm_exec}', 'dict', 'sequences.mf']
-    if not _run_command(dict_command, cwd=blamm_dir):
+    dict_command = [blamm_path, 'dict', "sequences.mf"]
+    if not _run_command(dict_command, cwd=output_dir):
         print("BLAMM dictionary creation failed.")
         return
 
-    hist_command = [f'./{blamm_exec}', 'hist', '-e', os.path.abspath(input_motifs_file), 'sequences.mf']
-    if not _run_command(hist_command, cwd=blamm_dir):
+    hist_command = [blamm_path, 'hist', '-e', os.path.abspath(input_motifs_file), "sequences.mf"]
+    if not _run_command(hist_command, cwd=output_dir):
         print("BLAMM histogram creation failed.")
         return
 
-    scan_command = [f'./{blamm_exec}', 'scan', '-rc', '-pt', str(p_value_threshold), os.path.abspath(input_motifs_file), 'sequences.mf']
-    if not _run_blamm_scan_with_progress(scan_command, cwd=blamm_dir):
+    scan_command = [blamm_path, 'scan', '-rc', '-pt', str(p_value_threshold), os.path.abspath(input_motifs_file), "sequences.mf"]
+    if not _run_blamm_scan_with_progress(scan_command, cwd=output_dir):
         print("BLAMM scan failed.")
         return
 
     # --- 3. Split the Large Occurrences File ---
     if split_occurrences:
         print("\n--- Splitting large occurrences file ---")
-        occurrences_file_path = os.path.join(blamm_dir, 'occurrences.txt')
+        occurrences_file_path = os.path.join(output_dir, 'occurrences.txt')
         if os.path.exists(occurrences_file_path):
             split_command = [
                 'split', '-l', str(split_line_count), '--numeric-suffixes',
                 'occurrences.txt', 'occurrences_part_'
             ]
-            if _run_command(split_command, cwd=blamm_dir):
+            if _run_command(split_command, cwd=output_dir):
                 print("Successfully split occurrences.txt into smaller parts.")
                 os.remove(occurrences_file_path)
         else:
             print("Warning: occurrences.txt not found, skipping split.")
 
     # --- 4. Organize BLAMM Output ---
-    print("\n--- Organizing BLAMM output files ---")
-    blamm_output_files = ['hist_empirical.txt', 'hist_theoretical.txt', 'PWMthresholds.txt']
-    for filename in blamm_output_files:
-        src = os.path.join(blamm_dir, filename)
-        dst = os.path.join(output_dir, filename)
-        if os.path.exists(src):
-            shutil.move(src, dst)
-            print(f"Moved {filename} to results directory.")
+    # print("\n--- Organizing BLAMM output files ---")
+    # blamm_output_files = ['hist_empirical.txt', 'hist_theoretical.txt', 'PWMthresholds.txt']
+    # for filename in blamm_output_files:
+    #     src = os.path.join(blamm_dir, filename)
+    #     dst = os.path.join(output_dir, filename)
+    #     if os.path.exists(src):
+    #         shutil.move(src, dst)
+    #         print(f"Moved {filename} to results directory.")
             
-    for filename in os.listdir(blamm_dir):
-        if filename.startswith('occurrences_part_'):
-            src = os.path.join(blamm_dir, filename)
-            dst = os.path.join(output_dir, filename)
-            shutil.move(src, dst)
-    print("Moved split occurrence files to results directory.")
+    # for filename in os.listdir(blamm_dir):
+    #     if filename.startswith('occurrences_part_'):
+    #         src = os.path.join(blamm_dir, filename)
+    #         dst = os.path.join(output_dir, filename)
+    #         shutil.move(src, dst)
+    # print("Moved split occurrence files to results directory.")
 
     print("Projection step successfully completed.")
